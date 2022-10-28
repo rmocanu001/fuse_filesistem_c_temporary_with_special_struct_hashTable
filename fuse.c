@@ -64,3 +64,8 @@ struct fuse_operations {
 	int (*fallocate) (const char *, int, off_t, off_t,
 			  struct fuse_file_info *);
 };
+
+
+int main(int argc, char*argv[]){
+	fuse_main(argc,argv,)
+}
