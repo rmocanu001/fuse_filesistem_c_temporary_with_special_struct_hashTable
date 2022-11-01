@@ -313,6 +313,7 @@ int my_rename (const char *path, const char *new_name){
 		return -ENOENT;
 	}
 	return 0;
+	
 }
 
 static struct fuse_operations myOperation = {
