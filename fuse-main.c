@@ -1,337 +1,420 @@
-#define FUSE_USE_VERSION 26
-
+#define FUSE_USE_VERSION 25
 #include <fuse.h>
-#include <stdio.h>
-#include <unistd.h>
-#include <sys/types.h>
-#include <time.h>
-#include <string.h>
-#include <stdlib.h>
 #include <errno.h>
+#include <string.h>
+#include <stdio.h>
+#include <stdlib.h>
 
-/* struct fuse_operations {
-	int (*getattr) (const char *, struct stat *);
-	int (*readlink) (const char *, char *, size_t);
-	int (*getdir) (const char *, fuse_dirh_t, fuse_dirfil_t);
-	int (*mknod) (const char *, mode_t, dev_t);
-	int (*mkdir) (const char *, mode_t);
-	int (*unlink) (const char *);
-	int (*rmdir) (const char *);
-	int (*symlink) (const char *, const char *);
-	int (*rename) (const char *, const char *);
-	int (*link) (const char *, const char *);
-	int (*chmod) (const char *, mode_t);
-	int (*chown) (const char *, uid_t, gid_t);
-	int (*truncate) (const char *, off_t);
-	int (*utime) (const char *, struct utimbuf *);
-	int (*open) (const char *, struct fuse_file_info *);
-	int (*read) (const char *, char *, size_t, off_t,
-		     struct fuse_file_info *);
-	int (*write) (const char *, const char *, size_t, off_t,
-		      struct fuse_file_info *);
-	int (*statfs) (const char *, struct statvfs *);
-	int (*flush) (const char *, struct fuse_file_info *);
-	int (*release) (const char *, struct fuse_file_info *);
-	int (*fsync) (const char *, int, struct fuse_file_info *);
-	int (*setxattr) (const char *, const char *, const char *, size_t, int);
-	int (*getxattr) (const char *, const char *, char *, size_t);
-	int (*listxattr) (const char *, char *, size_t);
-	int (*removexattr) (const char *, const char *);
-	int (*opendir) (const char *, struct fuse_file_info *);
-	int (*readdir) (const char *, void *, fuse_fill_dir_t, off_t,
-			struct fuse_file_info *);
-	int (*releasedir) (const char *, struct fuse_file_info *);
-	int (*fsyncdir) (const char *, int, struct fuse_file_info *);
-	void *(*init) (struct fuse_conn_info *conn);
-	void (*destroy) (void *);
-	int (*access) (const char *, int);
-	int (*create) (const char *, mode_t, struct fuse_file_info *);
-	int (*ftruncate) (const char *, off_t, struct fuse_file_info *);
-	int (*fgetattr) (const char *, struct stat *, struct fuse_file_info *);
-	int (*lock) (const char *, struct fuse_file_info *, int cmd,
-		     struct flock *);
-	int (*utimens) (const char *, const struct timespec tv[2]);
-	int (*bmap) (const char *, size_t blocksize, uint64_t *idx);
-	int (*ioctl) (const char *, int cmd, void *arg,
-		      struct fuse_file_info *, unsigned int flags, void *data);
-	int (*poll) (const char *, struct fuse_file_info *,
-		     struct fuse_pollhandle *ph, unsigned *reventsp);
-	int (*write_buf) (const char *, struct fuse_bufvec *buf, off_t off,
-			  struct fuse_file_info *);
-	int (*read_buf) (const char *, struct fuse_bufvec **bufp,
-			 size_t size, off_t off, struct fuse_file_info *);
-	int (*flock) (const char *, struct fuse_file_info *, int op);
-	int (*fallocate) (const char *, int, off_t, off_t,
-			  struct fuse_file_info *);
-}; */
-#pragma region delcaration vectors
-char dir_list[ 256 ][ 256 ];
-int curr_dir_idx = -1;
+#include "structs.h"
+#include "hash.h"
+#include "search.h"
 
-char files_list[ 256 ][ 256 ];
-int curr_file_idx = -1;
+struct HASHTABLE * fs_table;
 
-char links_list[ 256 ][ 256 ];
-int curr_link_idx = -1;
+int lfs_getattr  ( const char *, struct stat * );
+int lfs_readdir  ( const char *, void *, fuse_fill_dir_t, off_t, struct fuse_file_info * );
+int lfs_open     ( const char *, struct fuse_file_info * );
+int lfs_read     ( const char *, char *, size_t, off_t, struct fuse_file_info * );
+int lfs_release  ( const char *, struct fuse_file_info * );
+int lfs_mkdir    ( const char *, mode_t);
+int lfs_write    ( const char *, const char *, size_t, off_t, struct fuse_file_info *);
+int lfs_mknod    ( const char *, mode_t, dev_t);
+int lfs_truncate ( const char *, off_t);
+int lfs_unlink (const char *);
+int lfs_rename (const char * , const char *);
+int lfs_release(const char *, struct fuse_file_info *); 
+int lfs_utime (const char *, struct utimbuf *);
 
-
-char files_content[ 256 ][ 256 ];
-int curr_file_content_idx = -1;
-
-#pragma endregion
-#pragma region myfs_getattr
-int myfs_getattr(const char * path, struct stat * st){
-	st->st_uid = getuid();
-	st->st_gid = getgid();
-	st->st_atime = time( NULL );
-	st->st_mtime = time( NULL );
-	if ( strcmp( path, "/" ) == 0 || is_dir( path ) == 1 )
-	{
-		st->st_mode = S_IFDIR | 0755;
-		st->st_nlink = 2; 
-			}
-	else if ( is_file( path ) == 1 )
-	{
-		st->st_mode = S_IFREG | 0644;
-		st->st_nlink = 1;
-		st->st_size = 1024;
-	}
-	else if ( is_link(path)==1){
-		st->st_mode=S_IFLNK | 0777;
-		st->st_nlink=1;
-		st->st_size=strlen(path-1);
-	}
-	else
-	{
-		return -ENOENT;
-	}
-	
-	return 0;
-}
-#pragma endregion
-#pragma region myreaddir ->cit director
-int myfs_readdir(const char * path, void * buffer, fuse_fill_dir_t filler, off_t offset, struct fuse_file_info * finfo){
-	
-	printf( "--> Getting The List of Files of %s\n", path );
-	
-	filler( buffer, ".", NULL, 0 ); // Current Directory
-	filler( buffer, "..", NULL, 0 ); // Parent Directory
-	
-	if ( strcmp( path, "/" ) == 0 ) // If the user is trying to show the files/directories of the root directory show the following
-	{
-		for ( int curr_idx = 0; curr_idx <= curr_dir_idx; curr_idx++ )
-			filler( buffer, dir_list[ curr_idx ], NULL, 0 );
-	
-		for ( int curr_idx = 0; curr_idx <= curr_file_idx; curr_idx++ )
-			filler( buffer, files_list[ curr_idx ], NULL, 0 );
-	}
-	
-	return 0;
-	
-	return 0;
-}
-#pragma endregion
-#pragma region  do_read -> citire din fisier
-
-static int do_read( const char *path, char *buffer, size_t size, off_t offset, struct fuse_file_info *fi )
-{
-	int file_idx = get_file_index( path );
-	
-	if ( file_idx == -1 )
-		return -1;
-	
-	char *content = files_content[ file_idx ];
-	
-	memcpy( buffer, content + offset, size );
-		
-	return strlen( content ) - offset;
-
-}
-#pragma endregion
-
-#pragma region aux function
-void write_to_file( const char *path, const char *new_content )
-{
-	int file_idx = get_file_index( path );
-	
-	if ( file_idx == -1 ) // No such file
-		return;
-		
-	strcpy( files_content[ file_idx ], new_content ); 
-}
-
-int is_link(const char *path){
-	path++;
-	for ( int curr_idx = 0; curr_idx <= curr_link_idx; curr_idx++ )
-		if ( strcmp( path, links_list[ curr_idx ] ) == 0 )
-			return 1;
-	
-	return 0;
-
-}
-
-void add_link(const char *path){
-	curr_link_idx++;
-	strcpy( links_list[ curr_link_idx ], path );
-}
-
-void add_dir( const char *dir_name )
-{
-	curr_dir_idx++;
-	strcpy( dir_list[ curr_dir_idx ], dir_name );
-}
-int is_dir( const char *path )
-{
-	path++; // Eliminating "/" in the path
-	
-	for ( int curr_idx = 0; curr_idx <= curr_dir_idx; curr_idx++ )
-		if ( strcmp( path, dir_list[ curr_idx ] ) == 0 )
-			return 1;
-	
-	return 0;
-}
-
-void add_file( const char *filename )
-{
-	curr_file_idx++;
-	strcpy( files_list[ curr_file_idx ], filename );
-	
-	curr_file_content_idx++;
-	strcpy( files_content[ curr_file_content_idx ], "" );
-}
-
-int is_file( const char *path )
-{
-	path++; // Eliminating "/" in the path
-	
-	for ( int curr_idx = 0; curr_idx <= curr_file_idx; curr_idx++ )
-		if ( strcmp( path, files_list[ curr_idx ] ) == 0 )
-			return 1;
-	
-	return 0;
-}
-
-int get_file_index( const char *path )
-{
-	path++; // Eliminating "/" in the path
-	
-	for ( int curr_idx = 0; curr_idx <= curr_file_idx; curr_idx++ )
-		if ( strcmp( path, files_list[ curr_idx ] ) == 0 )
-			return curr_idx;
-	
-	return -1;
-}
-int get_dir_index( const char *path )
-{
-	path++; // Eliminating "/" in the path
-	
-	for ( int curr_idx = 0; curr_idx <= curr_dir_idx; curr_idx++ )
-		if ( strcmp( path, dir_list[ curr_idx ] ) == 0 )
-			return curr_idx;
-	
-	return 0;
-}
-#pragma endregion
-#pragma region do_mkdir
-static int do_mkdir( const char *path, mode_t mode )
-{
-	path++;
-	add_dir( path );
-	
-	return 0;
-}
-#pragma endregion
-#pragma region do_mknod
-static int do_mknod( const char *path, mode_t mode, dev_t rdev )
-{
-	path++;
-	add_file( path );
-	return 0;
-}
-#pragma endregion
-#pragma region do_write
-static int do_write( const char *path, const char *buffer, size_t size, off_t offset, struct fuse_file_info *info )
-{
-	write_to_file( path, buffer );
-	
-	return size;
-}
-#pragma endregion
-
-static int do_readlink(const char *path, char *buffer, size_t size)
-{
-	//path++;
-	strncpy(buffer, path, size);
-	buffer[size]='\0';
-	return 0;
-}
-static int my_link (const char *path, const char *link_path){
-	add_link(link_path);
-	int status=link(path,link_path);
-	return status;
-}
-
-int my_symlink (const char *path, const char *link_path){
-	add_link(link_path);
-	return symlink(path,link_path);
-}
-
-int do_rmdir (const char * path){
-	path++;
-	for ( int curr_idx = 0; curr_idx <= curr_dir_idx; curr_idx++ )
-		if ( strcmp( path, dir_list[ curr_idx ] ) == 0 )
-			{
-				//curr_dir_idx--;
-				for(int i=curr_idx; i<=curr_dir_idx; i++)
-				{
-					strcpy(dir_list[i],dir_list[i+1]);
-				}
-				curr_dir_idx--;
-			}
-			else
-			{
-				return -ENOENT;
-			}
-	
-	return 0;
-}
-
-
-
-int my_rename (const char *path, const char *new_name){
-	path++;
-	if(is_dir(path)==1){
-		int idx=get_dir_index(path);
-		strcpy(dir_list[idx],new_name);
-	}
-	else if(is_file(path)==1){
-		int idx=get_file_index(path);
-		strcpy(files_list[idx],new_name);
-	}
-	else
-	{
-		return -ENOENT;
-	}
-	return 0;
-	
-}
-
-static struct fuse_operations myOperation = {
-	.getattr = myfs_getattr,
-	.readdir = myfs_readdir,
-	.read		= do_read,
-    .mkdir		= do_mkdir,
-    .mknod		= do_mknod,
-    .write		= do_write,
-	.readlink	= do_readlink,
-	.link		= my_link,
-	.symlink	= my_symlink,
-	.rmdir		= do_rmdir,
-	.rename		= my_rename,
+static struct fuse_operations lfs_oper = {
+	.getattr	= lfs_getattr,
+	.readdir	= lfs_readdir,
+	.mknod      = lfs_mknod,
+	.mkdir      = lfs_mkdir,
+	.rmdir      = NULL,
+    .unlink     = lfs_unlink,
+	.truncate   = lfs_truncate,
+	.open	    = lfs_open,
+	.read	    = lfs_read,
+	.release    = lfs_release,
+	.write      = lfs_write,
+	.utime      = lfs_utime,
+    .destroy    = NULL, 
+    .rename     = lfs_rename,
 };
 
+int lfs_utime (const char *path, struct utimbuf *time){
+    struct HASHTABLE_NODE * node = find_node_from_path(fs_table, path);
+    if (node == NULL) {
+        char * path_dup = strdup(path);
+    char * last_segment = strrchr(path_dup, '/') + 1;
+    char * init_segments = (char *) malloc (strlen(path_dup) - strlen(last_segment));
+    strncat(init_segments , path_dup, (strlen(path_dup) - strlen(last_segment)) - 1);
+    char * parent_path = strcmp(init_segments, "") == 0 ? "/" : init_segments;
+    struct HASHTABLE_NODE * parent = find_node_from_path(fs_table, parent_path);
+    initialize_file(parent,last_segment);
+    struct lfs_file * file = (struct lsf_file*) node->entry;
+    add_entry_to_table(fs_table, path, (void *) file);
+    node = find_node_from_path(fs_table, path);
+    }
+    if (node->mode == 16877) {
+        printf("nu stiu ce are boss");
+        return -ENOENT;
+    }
+    struct lfs_file * file = (struct lsf_file*) node->entry;
+    file->last_accessed=time->actime;
+    file->last_modified=time->modtime;
+    return 0;
+
+}
 
 
-int main(int argc, char*argv[]){
-	return fuse_main(argc,argv,&myOperation, 0);
+int lfs_unlink (const char *path){
+    struct HASHTABLE_NODE * node = find_node_from_path(fs_table, path);
+    
+   
+    if (node == NULL) { 
+        printf("nu stiu ce are boss\n");
+        return -ENOENT; 
+    }
+
+    if (node->mode == 16877) {
+        printf("nu stiu ce are boss 2\n");
+        return -ENOENT;
+    }
+    
+    struct lfs_file * file = (struct lsf_file*) node->entry;
+
+    //dezaloc file data si sterg intrarea din directoriul 
+    
+    struct lfs_directory* parent = file->parent_dir;
+    
+    for(int i=0; i<parent->num_files; i++)
+    {
+        if(strcmp(parent->files[i]->name,file->name)==0){
+            printf("asta e numele: %s\n",file->name);
+            for(int k=i;k<parent->num_files-1;k++){
+                parent->files[k]=parent->files[k+1];
+            }
+            parent->num_files--;
+            free(file->data);
+            break;
+        } 
+    }
+    
+    remove_file_entry_to_table(fs_table,path,(void *) node->entry);
+    return 0;
+
+}
+
+int lfs_rename (const char *path , const char *new_path){
+     printf("rename: (path=%s)\n", path);
+
+    if(strcmp(path, new_path)==0)
+        return 0;
+    // struct lfs_file * file_2 = initialize_file(parent_2, last_segment);
+    // strcpy(file_2->data,file->data);
+    // strcpy(file_2->name,last_segment_2);
+    // add_entry_to_table(fs_table, new_path_dup, (void *) file_2);
+    // node = find_node_from_path(fs_table, parent_path);
+    // if (node->mode != 16877) {
+    //     return -ENOENT;
+    // }
+    // struct lfs_directory * parent = (struct lfs_directory * ) node->entry;
+    // remove_entry_to_table(fs_table,path_dup,(void *)file);
+
+    char * new_path_dup = strdup(new_path);
+    char * last_segment = strrchr(new_path_dup, '/') + 1;
+    char * init_segments = (char *) malloc (strlen(new_path_dup) - strlen(last_segment));
+    strncat(init_segments, new_path_dup, (strlen(new_path_dup) - strlen(last_segment)) - 1);
+    char * parent_path = strcmp(init_segments, "") == 0 ? "/" : init_segments;
+    struct HASHTABLE_NODE * node = find_node_from_path(fs_table, path);
+    struct lfs_file * file = (struct lsf_file*) node->entry;
+
+    strcpy(file->name,last_segment);
+    add_entry_to_table(fs_table, new_path, (void *) file);
+
+    int res;
+
+    return 0;
+}
+
+const char* get_file_path(const char * path){
+    int i;
+    int index=0;
+    for(i = 0; i <= strlen(path); i++)
+  	{
+  		if(path[i] == '/')  
+		{
+  			index = i;	
+ 		}
+	}
+    const char*buff;
+    if(index!=0)
+    {
+        strncpy(buff,path,index-1);
+        return buff;
+    }
+    else return path;
+    
+}
+const char* get_file_name(const char * path){
+    int i;
+    int index;
+    for(i = 0; i <= strlen(path); i++)
+  	{
+  		if(path[i] == '/')  
+		{
+  			index = i;	
+ 		}
+	}
+    const char*buff=NULL;
+    
+    strcpy(buff,path+index);
+    return buff;
+    
+}
+
+lfs_file*find_file_name(lfs_directory*dir, char*name){
+    //struct lfs_file*file=NULL;
+    for(int i=0; i<dir->num_files; i++)
+    {
+        if(strcmp(dir->files[i]->name,name)==0){
+            printf("asta e numele: %s\n",name);
+            return dir->files[i];
+        } 
+   }
+    return NULL;
+}
+
+int lfs_truncate(const char* path, off_t size){
+     printf("truncate: (path=%s)\n", path);
+
+
+    char * path_dup = strdup(path);
+    char * last_segment = strrchr(path_dup, '/') + 1;
+    char * init_segments = (char *) malloc (strlen(path_dup) - strlen(last_segment));
+    strncat(init_segments, path_dup, (strlen(path_dup) - strlen(last_segment)) - 1);
+
+    char * parent_path = strcmp(init_segments, "") == 0 ? "/" : init_segments;
+    struct HASHTABLE_NODE * node = find_node_from_path(fs_table, parent_path);
+    
+
+    if (node == NULL) { return -ENOENT; } 
+    
+    if (node->mode != 16877) {
+        return -ENOENT;
+    }
+   
+    struct lfs_directory * parent = (struct lfs_directory * ) node->entry;
+
+    struct lfs_file * file = find_file_name(parent,last_segment);
+
+    file->data = realloc(file->data, size);
+    file->size = size;
+    file->last_modified = file->last_accessed;
+    return size;
+}
+
+int lfs_write(const char * path, const char * buffer, size_t size, off_t offset, struct fuse_file_info * fi) {
+
+    struct lfs_file * file = (struct lfs_file *) fi->fh;
+    if (file == NULL) {
+        fprintf(stderr, "write: Could not find any file at path '%s'\n", path);
+        return -ENOENT;
+    }
+
+    int new_size;
+    if (offset + size > file->size) {
+        new_size = file->size + offset+size - file->size;
+    } else {
+        new_size = file->size + size - offset;
+    }
+
+    file->data = realloc(file->data, new_size);
+    memcpy(file->data + offset, buffer, size);
+
+    file->size = new_size;
+    file->last_modified = file->last_accessed;
+    return size;
+}
+
+int lfs_mkdir(const char * path, mode_t mode) {
+
+    printf("mkdir: (path=%s)\n", path);
+
+    char * path_dup = strdup(path);
+    char * last_segment = strrchr(path_dup, '/') + 1;
+    char * init_segments = (char *) malloc (strlen(path_dup) - strlen(last_segment));
+    strncat(init_segments, path_dup, (strlen(path_dup) - strlen(last_segment)) - 1);
+
+    char * parent_path = strcmp(init_segments, "") == 0 ? "/" : init_segments;
+    struct HASHTABLE_NODE * node = find_node_from_path(fs_table, parent_path);
+    
+
+    if (node == NULL) { return -ENOENT; } 
+    
+    if (node->mode != 16877) {
+        return -ENOENT;
+    }
+   
+    struct lfs_directory * parent = (struct lfs_directory * ) node->entry;
+
+    struct lfs_dir * dir = initialize_directory(parent, last_segment);
+    add_entry_to_table(fs_table, path_dup, (void *) dir);
+    return 0;
+}
+
+int lfs_mknod(const char * path, mode_t mode, dev_t rdev) {
+
+    printf("mknod: (path=%s)\n", path);
+
+    char * path_dup = strdup(path);
+    char * last_segment = strrchr(path_dup, '/') + 1;
+    char * init_segments = (char *) malloc (strlen(path_dup) - strlen(last_segment));
+    strncat(init_segments, path_dup, (strlen(path_dup) - strlen(last_segment)) - 1);
+
+    char * parent_path = strcmp(init_segments, "") == 0 ? "/" : init_segments;
+    struct HASHTABLE_NODE * node = find_node_from_path(fs_table, parent_path);
+    
+    if (node == NULL) { return -ENOENT; } 
+    
+    if (node->mode != 16877) {
+        return -ENOENT;
+    }
+   
+    struct lfs_directory * parent = (struct lfs_directory * ) node->entry;
+
+    struct lfs_file * file = initialize_file(parent, last_segment);
+    add_entry_to_table(fs_table, path_dup, (void *) file);
+    return 0;
+}
+
+
+
+int lfs_getattr( const char *path, struct stat *stbuf ) {
+	int res = 0;
+
+    printf("getattr: (path=%s)\n", path);
+
+	memset(stbuf, 0, sizeof(struct stat));
+    
+	if( strcmp( path, "/" ) == 0) {
+		stbuf->st_mode  = S_IFDIR | 0755;
+		stbuf->st_nlink = 2;
+        return res;
+	}
+
+    struct HASHTABLE_NODE * node = find_node_from_path(fs_table, path);
+    
+    if (node == NULL) { return -ENOENT; } 
+
+    if (node->mode == 16877) {
+        stbuf->st_mode = 16877;
+        struct lfs_directory * dir = (struct lfs_directory *) node->entry;
+        stbuf->st_atime = dir->last_accessed;
+        stbuf->st_mtime = dir->last_modified;
+        stbuf->st_nlink = 2;
+
+    } else if (node->mode == 33279){
+        struct lfs_file * file = (struct lfs_file *) node->entry;
+        stbuf->st_mode = file->mode;
+        stbuf->st_size = file->size;
+        stbuf->st_atime = file->last_accessed;
+        stbuf->st_mtime = file->last_modified;
+        stbuf->st_nlink = 1;
+    } else {
+        return -ENOENT;
+    }
+
+    return res;
+}
+
+int lfs_readdir( const char *path, void *buf, fuse_fill_dir_t filler, off_t offset, struct fuse_file_info *fi ) {
+	(void) offset;
+	(void) fi;
+	printf("readdir: (path=%s)\n", path);
+
+	filler(buf, ".", NULL, 0);
+	filler(buf, "..", NULL, 0);
+
+    struct HASHTABLE_NODE * node = find_node_from_path(fs_table, path);
+    
+    if (node == NULL) { return -ENOENT; } 
+    
+    if (node->mode != 16877) {
+        return -ENOENT;
+    }
+
+    struct lfs_directory * dir = (struct lfs_directory *) node->entry;
+    for (int i = 0; i < dir->num_directories; i++) {
+        filler(buf, dir->directories[i]->name, NULL, 0);
+    }
+
+    for (int i = 0; i < dir->num_files; i++) {
+        filler(buf, dir->files[i]->name, NULL, 0);
+    }
+
+	return 0;
+}
+
+//Permission
+int lfs_open( const char *path, struct fuse_file_info *fi ) {
+
+    printf("open: (path=%s)\n", path);
+
+    struct HASHTABLE_NODE * node = find_node_from_path(fs_table, path);
+    
+    if (node == NULL) { return -ENOENT; } 
+
+    if (node->mode == 16877) {
+        return -ENOENT;
+    }
+
+    struct lfs_file * file = (struct lfs_file *) node->entry;
+    file->last_accessed = time(NULL);
+    fi->fh = (uint64_t) file;
+
+	return 0;
+}
+
+int lfs_read( const char *path, char *buf, size_t size, off_t offset, struct fuse_file_info *fi ) {
+    printf("read: (path=%s)\n", path);
+
+    struct lfs_file * file = (struct lfs_file *) fi->fh;
+    if (offset + size >= file->size + size) {
+        return 0;
+    }
+
+    int bytes_to_read = file->size < size ? file->size : size;
+    memcpy(buf, file->data + offset, bytes_to_read);
+    printf("read %d bytes from file '%s'\n", bytes_to_read, path);
+    return bytes_to_read;
+}
+
+int lfs_release(const char *path, struct fuse_file_info *fi) {
+	printf("release: (path=%s)\n", path);
+
+    struct HASHTABLE_NODE * node = find_node_from_path(fs_table, path);
+    
+    if (node == NULL) { return -ENOENT; } 
+
+    if (node->mode == 16877) {
+        return -ENOENT;
+    }
+
+
+	return 0;
+}
+
+int main( int argc, char *argv[] ) {
+
+    fs_table = (struct HASHTABLE *) malloc(sizeof(struct HASHTABLE));
+    fs_table->size = STD_FILE_SYSTEM_SIZE; 
+
+    struct lfs_directory * root_directory = initialize_directory(NULL, "/");
+    add_entry_to_table(fs_table, "/", (void *) root_directory);
+
+	fuse_main( argc, argv, &lfs_oper);
+
+	return 0;
 }
