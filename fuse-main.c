@@ -11,38 +11,90 @@
 
 struct HASHTABLE * fs_table;
 
-int lfs_getattr  ( const char *, struct stat * );
-int lfs_readdir  ( const char *, void *, fuse_fill_dir_t, off_t, struct fuse_file_info * );
-int lfs_open     ( const char *, struct fuse_file_info * );
-int lfs_read     ( const char *, char *, size_t, off_t, struct fuse_file_info * );
-int lfs_release  ( const char *, struct fuse_file_info * );
-int lfs_mkdir    ( const char *, mode_t);
-int lfs_write    ( const char *, const char *, size_t, off_t, struct fuse_file_info *);
-int lfs_mknod    ( const char *, mode_t, dev_t);
-int lfs_truncate ( const char *, off_t);
-int lfs_unlink (const char *);
-int lfs_rename (const char * , const char *);
-int lfs_release(const char *, struct fuse_file_info *); 
-int lfs_utime (const char *, struct utimbuf *);
+int my_getattr  ( const char *, struct stat * );
+int my_readdir  ( const char *, void *, fuse_fill_dir_t, off_t, struct fuse_file_info * );
+int my_open     ( const char *, struct fuse_file_info * );
+int my_read     ( const char *, char *, size_t, off_t, struct fuse_file_info * );
+int my_release  ( const char *, struct fuse_file_info * );
+int my_mkdir    ( const char *, mode_t);
+int my_write    ( const char *, const char *, size_t, off_t, struct fuse_file_info *);
+int my_mknod    ( const char *, mode_t, dev_t);
+int my_truncate ( const char *, off_t);
+int my_unlink (const char *);
+int my_rename (const char * , const char *);
+int my_release(const char *, struct fuse_file_info *); 
+int my_utime (const char *, struct utimbuf *);
+int my_rmdir (const char * );
 
 static struct fuse_operations lfs_oper = {
-	.getattr	= lfs_getattr,
-	.readdir	= lfs_readdir,
-	.mknod      = lfs_mknod,
-	.mkdir      = lfs_mkdir,
-	.rmdir      = NULL,
-    .unlink     = lfs_unlink,
-	.truncate   = lfs_truncate,
-	.open	    = lfs_open,
-	.read	    = lfs_read,
-	.release    = lfs_release,
-	.write      = lfs_write,
-	.utime      = lfs_utime,
+	.getattr	= my_getattr,
+	.readdir	= my_readdir,
+	.mknod      = my_mknod,
+	.mkdir      = my_mkdir,
+	.rmdir      = my_rmdir,
+    .unlink     = my_unlink,
+	.truncate   = my_truncate,
+	.open	    = my_open,
+	.read	    = my_read,
+	.release    = my_release,
+	.write      = my_write,
+	.utime      = my_utime,
     .destroy    = NULL, 
-    .rename     = lfs_rename,
+    .rename     = my_rename,
 };
 
-int lfs_utime (const char *path, struct utimbuf *time){
+int my_rmdir (const char * path)
+{
+    struct HASHTABLE_NODE * node = find_node_from_path(fs_table, path);
+    
+   
+    if (node == NULL) { 
+        printf("nu stiu ce are boss\n");
+        return -ENOENT; 
+    }
+
+    if (node->mode != 16877) {
+        printf("face unlink, ce are boss 2\n");
+        return my_unlink(path);
+        return -ENOENT;
+    }
+
+    struct lfs_directory * file = (struct lfs_directory*) node->entry;
+    struct lfs_directory* parent = file->parent_dir;
+    printf("asta e numele: %s\n",file->name);
+    // for(int i=0; i<file->num_directories; i++){
+    //     char * new_path;
+    //     strcpy(new_path,file->files[i]->parent_dir);
+    //     if(file->files[i]->parent_dir!='/')
+    //     strcat(new_path,"/");
+    //     strcat(new_path,file->files[i]->name);
+    //     printf("pana in rm @@@@@@");
+    //     my_rmdir(new_path); 
+    for(int i=0; i<parent->num_directories; i++)
+    {
+        if(strcmp(parent->directories[i]->name,file->name)==0){
+
+            for(int k=i;k<parent->num_directories-1;k++){
+                parent->directories[k]=parent->directories[k+1];
+            }
+            parent->num_directories--;
+        }
+
+    //}
+    }
+    for(int i=0; i<file->num_files; i++){
+        char * new_path;
+        strcpy(new_path,file->files[i]->parent_dir);
+        strcat(new_path,"/");
+        strcat(new_path,file->files[i]->name);
+        my_unlink(new_path);
+    }
+    printf("face rmdir, ce are boss 2\n");
+
+    remove_file_entry_to_table(fs_table,path,(void *) file);
+}
+
+int my_utime (const char *path, struct utimbuf *time){
     struct HASHTABLE_NODE * node = find_node_from_path(fs_table, path);
     if (node == NULL) {
         char * path_dup = strdup(path);
@@ -68,7 +120,7 @@ int lfs_utime (const char *path, struct utimbuf *time){
 }
 
 
-int lfs_unlink (const char *path){
+int my_unlink (const char *path){
     struct HASHTABLE_NODE * node = find_node_from_path(fs_table, path);
     
    
@@ -106,7 +158,7 @@ int lfs_unlink (const char *path){
 
 }
 
-int lfs_rename (const char *path , const char *new_path){
+int my_rename (const char *path , const char *new_path){
      printf("rename: (path=%s)\n", path);
 
     if(strcmp(path, new_path)==0)
@@ -186,7 +238,7 @@ lfs_file*find_file_name(lfs_directory*dir, char*name){
     return NULL;
 }
 
-int lfs_truncate(const char* path, off_t size){
+int my_truncate(const char* path, off_t size){
      printf("truncate: (path=%s)\n", path);
 
 
@@ -215,7 +267,7 @@ int lfs_truncate(const char* path, off_t size){
     return size;
 }
 
-int lfs_write(const char * path, const char * buffer, size_t size, off_t offset, struct fuse_file_info * fi) {
+int my_write(const char * path, const char * buffer, size_t size, off_t offset, struct fuse_file_info * fi) {
 
     struct lfs_file * file = (struct lfs_file *) fi->fh;
     if (file == NULL) {
@@ -238,7 +290,7 @@ int lfs_write(const char * path, const char * buffer, size_t size, off_t offset,
     return size;
 }
 
-int lfs_mkdir(const char * path, mode_t mode) {
+int my_mkdir(const char * path, mode_t mode) {
 
     printf("mkdir: (path=%s)\n", path);
 
@@ -264,7 +316,7 @@ int lfs_mkdir(const char * path, mode_t mode) {
     return 0;
 }
 
-int lfs_mknod(const char * path, mode_t mode, dev_t rdev) {
+int my_mknod(const char * path, mode_t mode, dev_t rdev) {
 
     printf("mknod: (path=%s)\n", path);
 
@@ -291,7 +343,7 @@ int lfs_mknod(const char * path, mode_t mode, dev_t rdev) {
 
 
 
-int lfs_getattr( const char *path, struct stat *stbuf ) {
+int my_getattr( const char *path, struct stat *stbuf ) {
 	int res = 0;
 
     printf("getattr: (path=%s)\n", path);
@@ -329,7 +381,7 @@ int lfs_getattr( const char *path, struct stat *stbuf ) {
     return res;
 }
 
-int lfs_readdir( const char *path, void *buf, fuse_fill_dir_t filler, off_t offset, struct fuse_file_info *fi ) {
+int my_readdir( const char *path, void *buf, fuse_fill_dir_t filler, off_t offset, struct fuse_file_info *fi ) {
 	(void) offset;
 	(void) fi;
 	printf("readdir: (path=%s)\n", path);
@@ -358,7 +410,7 @@ int lfs_readdir( const char *path, void *buf, fuse_fill_dir_t filler, off_t offs
 }
 
 //Permission
-int lfs_open( const char *path, struct fuse_file_info *fi ) {
+int my_open( const char *path, struct fuse_file_info *fi ) {
 
     printf("open: (path=%s)\n", path);
 
@@ -377,7 +429,7 @@ int lfs_open( const char *path, struct fuse_file_info *fi ) {
 	return 0;
 }
 
-int lfs_read( const char *path, char *buf, size_t size, off_t offset, struct fuse_file_info *fi ) {
+int my_read( const char *path, char *buf, size_t size, off_t offset, struct fuse_file_info *fi ) {
     printf("read: (path=%s)\n", path);
 
     struct lfs_file * file = (struct lfs_file *) fi->fh;
@@ -391,7 +443,7 @@ int lfs_read( const char *path, char *buf, size_t size, off_t offset, struct fus
     return bytes_to_read;
 }
 
-int lfs_release(const char *path, struct fuse_file_info *fi) {
+int my_release(const char *path, struct fuse_file_info *fi) {
 	printf("release: (path=%s)\n", path);
 
     struct HASHTABLE_NODE * node = find_node_from_path(fs_table, path);
@@ -401,7 +453,6 @@ int lfs_release(const char *path, struct fuse_file_info *fi) {
     if (node->mode == 16877) {
         return -ENOENT;
     }
-
 
 	return 0;
 }
