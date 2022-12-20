@@ -24,3 +24,6 @@ Probleme intalnite:
 * In momentul de fata putem accesa doar 2 layere de directoare sau fisiere deoarece denumiriile le salvam intr-o matice [n][2];
 
 * Am implementat din tutorialul LSYS FUSE tot ce era posibil limitati fiind de faptul ca nu am creeat o structura in care sa salvam diverse informatii;
+
+
+*la rmdir aparent comanda rm -r face singura recursivitate **stau de 2 zile sa imi dau seama ce fac gresit de iese segm fault(rezolvare: Am scos recursivitatea :)) )
