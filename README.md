@@ -26,4 +26,4 @@ Probleme intalnite:
 * Am implementat din tutorialul LSYS FUSE tot ce era posibil limitati fiind de faptul ca nu am creeat o structura in care sa salvam diverse informatii;
 
 
-*la rmdir aparent comanda rm -r face singura recursivitate **stau de 2 zile sa imi dau seama ce fac gresit de iese segm fault(rezolvare: Am scos recursivitatea :)) )
+*la rmdir aparent comanda rm -r face singura recursivitate. Stăm de 2 zile să ne dăm seama ce facem greșit de iese segm fault ( rezolvare: Am scos recursivitatea )
