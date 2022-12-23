@@ -25,6 +25,8 @@ int my_rename (const char * , const char *);
 int my_release(const char *, struct fuse_file_info *); 
 int my_utime (const char *, struct utimbuf *);
 int my_rmdir (const char * );
+int my_chmod (const char *, mode_t);
+
 
 static struct fuse_operations lfs_oper = {
 	.getattr	= my_getattr,
@@ -41,7 +43,17 @@ static struct fuse_operations lfs_oper = {
 	.utime      = my_utime,
     .destroy    = NULL, 
     .rename     = my_rename,
+    .chmod      = my_chmod,
 };
+
+int my_chmod (const char *path, mode_t mode){
+    struct HASHTABLE_NODE * node = find_node_from_path(fs_table, path);
+    // if (node->mode == 16877) {
+    //     return -ENOENT;
+    // }
+    // nu recomand deoarece node->mode folosesc pentru a recunoaste in functii tipul de entitate regular_file/directory
+    return 0;
+}
 
 int my_rmdir (const char * path)
 {

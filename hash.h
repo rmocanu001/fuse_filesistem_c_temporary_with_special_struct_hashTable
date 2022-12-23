@@ -30,28 +30,19 @@ unsigned long djb2_hash(char *str) {
         return hash;
 }
 
-/* Creates a HASHTABLE_NODE from a given path and entry and inserts
-it into the given HASHTABLE using a computed hash. Handles collisions in a 
-linked-list manner. */
+
 int add_entry_to_table(struct HASHTABLE * table, char * path, void * entry) {
 
     unsigned long index = djb2_hash(path) % table->size;
-    
-    /* Create a new HASHTABLE_NODE instance */
+    //creez instanta de has_node noua
     struct HASHTABLE_NODE * this = (struct HASHTABLE_NODE * ) malloc(sizeof(struct HASHTABLE_NODE));
 
-    /* We can do this as mode is the first field in both the
-    lfs_file and the lfs_directory structs, so it doens't change
-    as it has a strictly defined size mode_t */
-
-    this->mode = ((struct lfs_file * ) entry)->mode;
+    this->mode = ((struct lfs_file * ) entry)->mode; //nu conteaza dc e lfs_directory
     this->entry = entry;
     this->path = path;
     this->is_linked = 0;
     this->next = NULL;
-
-
-    /* Collision, handle it using linked-list like behavior */
+    //tratez coliziunile cu lista simplu inlantuita
     if (table->table[index] != NULL) {
         struct HASHTABLE_NODE * node = table->table[index];
         while (node->is_linked == 1) { node = node->next; }
@@ -66,8 +57,6 @@ int add_entry_to_table(struct HASHTABLE * table, char * path, void * entry) {
 int remove_file_entry_to_table(struct HASHTABLE * table, char * path, void * entry) {
 
     unsigned long index = djb2_hash(path) % table->size;
-    
-    /* Create a new HASHTABLE_NODE instance */
     struct HASHTABLE_NODE * node = table->table[index];
     table->table[index]=table->table[index]->next;
     free(node);

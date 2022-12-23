@@ -45,10 +45,6 @@ typedef struct lfs_directory {
 struct lfs_file * initialize_file(struct lfs_directory * parent, char * name) {
 
 
-    #ifdef DEBUG
-        printf("Initializing file with name: '%s'\n", name);
-    #endif
-
     struct lfs_file * file = malloc(sizeof(struct lfs_file));
 
     file->parent_dir = parent;
@@ -79,9 +75,7 @@ struct lfs_directory * initialize_directory(struct lfs_directory * parent, char 
         parent->num_directories++; 
     }
 
-    #ifdef DEBUG
-        printf("Initialized directory with name: '%s'\n", name);
-    #endif
+    
 
     dir->created_at    = time(NULL);
     dir->last_accessed = dir->created_at; 
