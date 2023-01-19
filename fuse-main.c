@@ -1,14 +1,8 @@
 #define FUSE_USE_VERSION 25
 #include <fuse.h>
-#include <errno.h>
-#include <string.h>
-#include <stdio.h>
-#include <stdlib.h>
+#include "struct.h"
 
-#include "structs.h"
-#include "hash.h"
-#include "search.h"
-
+struct lfs_directory * root_directory;
 struct HASHTABLE * fs_table;
 
 int my_getattr  ( const char *, struct stat * );
@@ -26,6 +20,9 @@ int my_release(const char *, struct fuse_file_info *);
 int my_utime (const char *, struct utimbuf *);
 int my_rmdir (const char * );
 int my_chmod (const char *, mode_t);
+int my_create (const char *, mode_t , struct fuse_file_info*);
+int my_readlink(const char *, char *, size_t );
+int my_link(const char *from, const char *to);
 
 
 static struct fuse_operations lfs_oper = {
@@ -44,14 +41,118 @@ static struct fuse_operations lfs_oper = {
     .destroy    = NULL, 
     .rename     = my_rename,
     .chmod      = my_chmod,
+    .create     = my_create,
+    .readlink   = my_readlink,
+    .link       = my_link
+    
 };
 
-int my_chmod (const char *path, mode_t mode){
+int my_readlink(const char *path, char *buf, size_t size) {
+  //char fpath[MAX_PATH_LEN];
     struct HASHTABLE_NODE * node = find_node_from_path(fs_table, path);
-    // if (node->mode == 16877) {
+
+    if(!S_ISLNK(node->mode)){
+        return -ENOENT; 
+    }
+
+    struct lfs_file * file = (struct lsf_file*) node->entry;
+   
+    char*full_path=NULL;
+    strcpy(full_path,file->parent_dir);
+    strcat(full_path,file->name);
+
+    strncpy(buf,full_path,size);
+
+  return 0;
+}
+
+int my_link(const char *from, const char *to) {
+  struct HASHTABLE_NODE * node = find_node_from_path(fs_table, from);
+    
+    if (node == NULL) { return -ENOENT; } 
+    
+    if (!S_ISREG(node->mode)) {
+        return -ENOENT;
+    }
+
+    char * path_dup = strdup(to);
+    char * last_segment = strrchr(path_dup, '/') + 1;
+    char * init_segments = (char *) malloc (strlen(path_dup) - strlen(last_segment));
+    strncat(init_segments, path_dup, (strlen(path_dup) - strlen(last_segment)) - 1);
+
+    char * parent_path = strcmp(init_segments, "") == 0 ? "/" : init_segments;
+    struct HASHTABLE_NODE * node2 = find_node_from_path(fs_table, parent_path);
+
+    struct lfs_directory * parent = (struct lfs_directory * ) node2->entry;
+
+
+    struct lfs_file * file_from = (struct lsf_file*) node->entry;
+
+    struct lfs_file * file = initialize_file(parent, last_segment);
+
+    file->size=file_from->size;
+    strcpy(file->data,file_from->data);
+    file->links++;
+    file_from->links++;
+    //printf("\n\ninode: %d,       %d\n\n",file->inode,file_from->inode);
+    file->inode=file_from->inode;
+    printf("\n\ninode: %d,       %d\n\n",file->inode,file_from->inode);
+    add_entry_to_table(fs_table, path_dup, (void *) file);
+ 
+  return 0;
+}
+
+int my_chmod (const char *path, mode_t mode){
+        struct HASHTABLE_NODE * node = find_node_from_path(fs_table, path);
+    // if (S_ISDIR(node->mode)) {
     //     return -ENOENT;
     // }
     // nu recomand deoarece node->mode folosesc pentru a recunoaste in functii tipul de entitate regular_file/directory
+    if (node == NULL) { 
+        printf("nu stiu ce are boss\n");
+        return -ENOENT; 
+    }
+
+    if (S_ISDIR(node->mode)) {
+        struct lfs_directory * dir = (struct lfs_directory*) node->entry;
+        //node->mode=mode;
+        dir->mode=mode;
+        dir->last_modified=time(NULL);
+    }
+
+    if (S_ISREG(node->mode)) {
+        struct lfs_file * file = (struct lsf_file*) node->entry;
+        //node->mode=mode;
+        file->mode=mode;
+        file->last_modified=time(NULL);
+    }
+
+
+    return 0;
+}
+
+int my_create (const char *path, mode_t mode, struct fuse_file_info *fi){
+    printf("create: (path=%s)\n", path);
+
+    char * path_dup = strdup(path);
+    char * last_segment = strrchr(path_dup, '/') + 1;
+    char * init_segments = (char *) malloc (strlen(path_dup) - strlen(last_segment));
+    strncat(init_segments, path_dup, (strlen(path_dup) - strlen(last_segment)) - 1);
+
+    char * parent_path = strcmp(init_segments, "") == 0 ? "/" : init_segments;
+    struct HASHTABLE_NODE * node = find_node_from_path(fs_table, parent_path);
+    
+    if (node == NULL) { return -ENOENT; } 
+    
+    if (S_ISREG(node->mode)) {
+        return -ENOENT;
+    }
+   
+    struct lfs_directory * parent = (struct lfs_directory * ) node->entry;
+
+    struct lfs_file * file = initialize_file(parent, last_segment);
+    add_entry_to_table(fs_table, path_dup, (void *) file);
+    fi->fh = (uint64_t) file;
     return 0;
 }
 
@@ -65,7 +166,7 @@ int my_rmdir (const char * path)
         return -ENOENT; 
     }
 
-    if (node->mode != 16877) {
+    if (S_ISREG(node->mode)) {
         printf("face unlink, ce are boss 2\n");
         return my_unlink(path);
         return -ENOENT;
@@ -120,7 +221,7 @@ int my_utime (const char *path, struct utimbuf *time){
     add_entry_to_table(fs_table, path, (void *) file);
     node = find_node_from_path(fs_table, path);
     }
-    if (node->mode == 16877) {
+    if (S_ISDIR(node->mode)) {
         printf("nu stiu ce are boss");
         return -ENOENT;
     }
@@ -141,12 +242,13 @@ int my_unlink (const char *path){
         return -ENOENT; 
     }
 
-    if (node->mode == 16877) {
+    if (S_ISDIR(node->mode)) {
         printf("nu stiu ce are boss 2\n");
         return -ENOENT;
     }
+    struct lfs_file * file=NULL;
     
-    struct lfs_file * file = (struct lsf_file*) node->entry;
+    file = (struct lsf_file*) node->entry;
 
     //dezaloc file data si sterg intrarea din directoriul 
     
@@ -180,7 +282,7 @@ int my_rename (const char *path , const char *new_path){
     // strcpy(file_2->name,last_segment_2);
     // add_entry_to_table(fs_table, new_path_dup, (void *) file_2);
     // node = find_node_from_path(fs_table, parent_path);
-    // if (node->mode != 16877) {
+    // if (S_ISREG(node->mode)) {
     //     return -ENOENT;
     // }
     // struct lfs_directory * parent = (struct lfs_directory * ) node->entry;
@@ -265,7 +367,7 @@ int my_truncate(const char* path, off_t size){
 
     if (node == NULL) { return -ENOENT; } 
     
-    if (node->mode != 16877) {
+    if (S_ISREG(node->mode)) {
         return -ENOENT;
     }
    
@@ -286,6 +388,13 @@ int my_write(const char * path, const char * buffer, size_t size, off_t offset, 
         fprintf(stderr, "write: Could not find any file at path '%s'\n", path);
         return -ENOENT;
     }
+    if(((file->mode&S_IWUSR)==0)&&((file->mode&S_IWGRP)==0)&&((file->mode&S_IWOTH)==0)){
+        printf("\n\n mode: %s \n",file->mode&S_IWUSR);
+        return 0;
+    }
+    printf("\n\n%d\n\n",file->mode);
+    printf("\n\niwusr:%d\n\n",S_IWUSR);
+
 
     int new_size;
     if (offset + size > file->size) {
@@ -317,7 +426,7 @@ int my_mkdir(const char * path, mode_t mode) {
 
     if (node == NULL) { return -ENOENT; } 
     
-    if (node->mode != 16877) {
+    if (S_ISREG(node->mode)) {
         return -ENOENT;
     }
    
@@ -342,7 +451,7 @@ int my_mknod(const char * path, mode_t mode, dev_t rdev) {
     
     if (node == NULL) { return -ENOENT; } 
     
-    if (node->mode != 16877) {
+    if (S_ISREG(node->mode)) {
         return -ENOENT;
     }
    
@@ -372,21 +481,23 @@ int my_getattr( const char *path, struct stat *stbuf ) {
     
     if (node == NULL) { return -ENOENT; } 
 
-    if (node->mode == 16877) {
+    if (S_ISDIR(node->mode)) {
         stbuf->st_mode = 16877;
         struct lfs_directory * dir = (struct lfs_directory *) node->entry;
         stbuf->st_atime = dir->last_accessed;
         stbuf->st_mtime = dir->last_modified;
-        stbuf->st_nlink = 2;
-
-    } else if (node->mode == 33279){
+        stbuf->st_nlink = dir->links;
+        stbuf->st_ino=dir->inode;
+    } else if (S_ISREG(node->mode)){
         struct lfs_file * file = (struct lfs_file *) node->entry;
         stbuf->st_mode = file->mode;
         stbuf->st_size = file->size;
         stbuf->st_atime = file->last_accessed;
         stbuf->st_mtime = file->last_modified;
-        stbuf->st_nlink = 1;
-    } else {
+        stbuf->st_nlink = file->links;
+        stbuf->st_ino=file->inode;
+    } 
+    else {
         return -ENOENT;
     }
 
@@ -405,7 +516,7 @@ int my_readdir( const char *path, void *buf, fuse_fill_dir_t filler, off_t offse
     
     if (node == NULL) { return -ENOENT; } 
     
-    if (node->mode != 16877) {
+    if (S_ISREG(node->mode)) {
         return -ENOENT;
     }
 
@@ -430,7 +541,7 @@ int my_open( const char *path, struct fuse_file_info *fi ) {
     
     if (node == NULL) { return -ENOENT; } 
 
-    if (node->mode == 16877) {
+    if (S_ISDIR(node->mode)) {
         return -ENOENT;
     }
 
@@ -445,6 +556,17 @@ int my_read( const char *path, char *buf, size_t size, off_t offset, struct fuse
     printf("read: (path=%s)\n", path);
 
     struct lfs_file * file = (struct lfs_file *) fi->fh;
+
+
+    printf("\n\n%o\n\n",file->mode);
+    printf("\n\nirusr:%o\n\n",S_IRUSR);
+    printf("\n\n mode: %o \n",file->mode&S_IRUSR);
+    
+    if(((file->mode&S_IRUSR)==0)&&((file->mode&S_IRGRP)==0)&&((file->mode&S_IROTH)==0)){
+        printf("\n\n mode: %s \n",file->mode&S_IRUSR);
+        return 0;
+    }
+
     if (offset + size >= file->size + size) {
         return 0;
     }
@@ -454,7 +576,14 @@ int my_read( const char *path, char *buf, size_t size, off_t offset, struct fuse
     printf("read %d bytes from file '%s'\n", bytes_to_read, path);
     return bytes_to_read;
 }
-
+#define PATH_MAX 250
+static char *mounpoint;
+static void bb_fullpath(char fpath[PATH_MAX], const char *path)
+{
+    strcpy(fpath, mounpoint);
+    strncat(fpath, path, PATH_MAX); // ridiculously long paths will
+				    // break here
+}
 int my_release(const char *path, struct fuse_file_info *fi) {
 	printf("release: (path=%s)\n", path);
 
@@ -462,7 +591,7 @@ int my_release(const char *path, struct fuse_file_info *fi) {
     
     if (node == NULL) { return -ENOENT; } 
 
-    if (node->mode == 16877) {
+    if (S_ISDIR(node->mode)) {
         return -ENOENT;
     }
 
@@ -470,13 +599,14 @@ int my_release(const char *path, struct fuse_file_info *fi) {
 }
 
 int main( int argc, char *argv[] ) {
-
-    fs_table = (struct HASHTABLE *) malloc(sizeof(struct HASHTABLE));
+    umask(0);
+    fs_table = (HASHTABLE *) malloc(sizeof(HASHTABLE));
     fs_table->size = STD_FILE_SYSTEM_SIZE; 
-
-    struct lfs_directory * root_directory = initialize_directory(NULL, "/");
+    mounpoint = realpath(argv[argc-1], NULL);
+    printf("\n\nmountpoint path :%s\n",mounpoint);
+    lfs_directory * root_directory = initialize_directory(NULL, "/");
     add_entry_to_table(fs_table, "/", (void *) root_directory);
-
+    printf("\n\nmountpoint path :%s\n",mounpoint);
 	fuse_main( argc, argv, &lfs_oper);
 
 	return 0;
